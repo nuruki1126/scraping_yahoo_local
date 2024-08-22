@@ -627,29 +627,40 @@ pref_dic = [
             ["43", "熊本"], ["44", "大分"],   ["45", "宮崎"], ["46", "鹿児島"], ["47", "沖縄"]
         ]
 
-orders = ["店名", "電話", "住所", "アクセス", "営業時間", "定休日", "お店のホームページ", "支払い方法"]
+orders = ["店名", "電話", "住所", "ジャンル",]
 
 class Scraping:
-    def __init__(self, urls):
+    def __init__(self, urls, genres):
         self.urls = urls
+        self.genres = genres
 
     async def run(self):
         await self.fetch()
 
     async def fetch(self):
         href_array = []
-        repeat_nums = await asyncio.gather(*(self.calc_repeat_num(url) for url in self.urls)) # calc_repeat_numから取得したデータをrepeat_numsに追加
+        repeat_num = 0
 
         #("All repeat numbers:", repeat_nums) #デバッグ用
-        detail_data_array = []
         url = ""
+        detail_datas_array = []
+        index = 0
 
-        for url, repeat_num  in zip(self.urls, repeat_nums): # それぞれに実行するためのzipとfor
+        for urls  in zip(self.urls): # それぞれに実行するためのzipとfor
+            detail_data_array = []
+
+            for url in urls[0]:
             #detail_data.append((await asyncio.gather(self.scraping(url, repeat_num)))[0])
-           
-            #detail_data_array.extend((await asyncio.gather(self.scraping(url, repeat_num)))[0])
+                print("url", url)
+                repeat_num = await asyncio.gather((self.calc_repeat_num(url))) # calc_repeat_numから取得したデータをrepeat_numsに追加
+
+                detail_data_array.extend((await asyncio.gather(self.scraping(url, repeat_num[0]))))
+            
+            detail_datas_array.append( detail_data_array )
         
-            output_csv([(await asyncio.gather(self.scraping(url, repeat_num)))[0]], url)
+        for index, url in enumerate(self.genres):
+
+            output_csv([detail_datas_array[index]], url)
 
 
     #各都道府県,各ジャンルの繰り返し回数を計算する関数
@@ -657,23 +668,25 @@ class Scraping:
     #           url
     # @return:  repeat_num (ページネーション数)
     async def calc_repeat_num( self, url ):
-        
         url = url.format(1)
+        repeat_num = 0
         context = ssl.create_default_context( cafile=certifi.where() )
         try:
             detail_request = urllib.request.Request( url )
             detail_html = urllib.request.urlopen( detail_request, context=context ).read()
             detail_soup = BeautifulSoup( detail_html, "lxml-xml" )
 
-            total = int( detail_soup.find( "Total" ).text )
+            total_tags = detail_soup.find_all("Total")
+            total = int(total_tags[0].text)
 
-            repeat_num = 0
+           
             if( total > 100 ):
                 repeat_num = math.ceil( total / 100 )  
         except Exception as e:
-            print(f"Error occurred: {e}")
+            print("")
 
-        print( "ページ数取得中...", repeat_num )
+        print( url ,"の最大ページを取得中... ", repeat_num  )
+
         return repeat_num
 
     # 詳細ページの情報を取得する関数
@@ -700,6 +713,7 @@ class Scraping:
                         detail_data.append( feature.find( "Address" ).text )
                         detail_data.append( feature.find( "Tel1" ).text )
                         detail_data.append( feature.find( "Genre" ).find( "Name" ).text )
+                        print( url, "のデータを取得中...", detail_data )
 
                         detail_data_array.append(detail_data)
                     except Exception as e:
@@ -724,6 +738,7 @@ class Scraping:
                             detail_data.append( feature.find( "Address" ).text )
                             detail_data.append( feature.find( "Tel1" ).text )
                             detail_data.append( feature.find( "Genre" ).find( "Name" ).text )
+                            print( url, "のデータを取得中...", detail_data )
 
                             detail_data_array.append(detail_data)
                         except Exception as e:
@@ -731,6 +746,8 @@ class Scraping:
 
         except Exception as e:
             print(f"Error occurred: {e}")
+        
+       
         
         return detail_data_array
     
@@ -742,23 +759,15 @@ class Scraping:
 def output_csv(detail_datas, url):
     gc_pattern = r"gc=([^&]*)"  # ジャンルのindex
     ac_pattern = r"ac=([^&]*)" # 都道府県のindex
-    
-    gc_match = re.search( gc_pattern, url )
-    ac_match = re.search( ac_pattern, url )
 
-    print( url )
 
-    # 一致するデータを取得
-    ac_value = ac_match.group(1)
-    gc_value = gc_match.group(1)
-    
-    for i in range(0, len(genre_dic)):
-        if ( genre_dic[i][0] == gc_value[:2] ):
-            genre_name = genre_dic[i][1]
+    # for i in range(0, len(genre_dic)):
+    #     if ( genre_dic[i][0] == url[0] ):
+    genre_name = genre_dic[int(url[0])][1]
 
-    for i in range(0, 47):
-        if ( pref_dic[i][0] == ac_value ):
-            pref_name = pref_dic[i][1]
+    # for i in range(0, 47):
+    #     if ( pref_dic[i][0] == url[1] ):
+    pref_name = pref_dic[int(url[1])][1]
     try:
         folder_path =f"yahoo_local/{pref_name}"
         if not os.path.exists(folder_path):
@@ -777,7 +786,7 @@ def output_csv(detail_datas, url):
 
         for detail_data in detail_datas[0]:
                 # データを書き込む
-            writer.writerows([detail_data])
+            writer.writerows(detail_data)
 
     print(f"\033[32mProcess\033[0m: {file_name}を作成しました")
 
@@ -801,8 +810,8 @@ def insert_with_blank(lst, index, value):
 async def main():
     url = "https://map.yahooapis.jp/search/local/V1/localSearch?appid=dj00aiZpPUJ4VmJyU1FKOUxRNSZzPWNvbnN1bWVyc2VjcmV0Jng9ZTI-&ac={}&gc={}&start={}&results=100"
 
-
-    url_array = []
+    urls_array = []
+    genres = []
 
     select_genres_index = []
     select_prefs_index = []
@@ -811,104 +820,106 @@ async def main():
     # 緑色 \033[32mThis is green text.\033[0m
     # 黄色 \033[33mThis is yellow text.\033[0m
     # 青色 \033[34mThis is blue text.\033[0m
-
     print("Process: ジャンルを選択してください")
     for index, genre in enumerate(genre_dic):
         print(f"{index + 1}",":",f"{genre[1]}")
-    print("9 : 全ジャンル選択")
 
     flag = True
 
-    while True:
-        print("\033[34mInput\033[0m: 半角で数値を入力してください (1-4) [コマンド y:エリア選択に進む, d:追加した要素を削除] ")
-        i = input("\033[34mEnter\033[0m: ")
-        array_genre_index = i.split()
-        # print(array_genre_index)
-        try:
-            for genre_index in array_genre_index:
-                genre_index = str(int(genre_index) - 1)
-                if 0 <= int(genre_index) <= 3 and genre_index not in select_genres_index: # 入力番号が0~5, まだ入力されていない番号
-                    select_genres_index.append(genre_index)
-                elif int(genre_index) == int(8): # 全ジャンルの追加
-                    for i in range(0, 4):
-                        if str(i) not in select_genres_index and flag: # select_genres_indexに含まれていない∧flagがTrue
-                            select_genres_index.append(str(i))
-                        elif flag == False:
-                            print(f"Delete Error: 全ジャンル追加済みです")
-                            break
-                    flag = False
-                elif genre_index in select_genres_index:
-                    print(f"Input Error: {genre_dic[int(genre_index)]}はすでに追加済みです")
-                else:
-                    print(f"Input Error: 入力された[{int(genre_index)+1}]は存在しません")
-
-            for  genre_index in select_genres_index:
-                print(f"Selected Genre: {genre_dic[int(genre_index)][1]}")
-
-        except ValueError: # 数字以外の入力
-            if genre_index == "d": # 空の配列を削除しようとした時の処理
-                if len(select_genres_index) != 0: # 配列に値が存在する場合の処理
-                    print(f"Delete: {genre_dic[int(select_genres_index[-1])]}を削除しました")
-                    select_genres_index.pop()
-                    flag = True
-                else:
-                    print("ジャンルが選択されていません")
-                for genre_index in select_genres_index:
-                    print(f"Selected Genre: {genre_dic[int(genre_index)][1]}")
-            elif genre_index == "y":
-                for genre_index in select_genres_index:
-                    print(f"Selected Genre: {genre_dic[int(genre_index)][1]}")
-                break
+    print("\033[34mInput\033[0m: 半角で数値を入力してください (1-4) [コマンド y:エリア選択に進む, d:追加した要素を削除] ")
+    i = input("\033[34mEnter\033[0m: ")
+    array_genre_index = i.split()
+    # print(array_genre_index)
+    try:
+        for genre_index in array_genre_index:
+            genre_index = str(int(genre_index) - 1)
+            if 0 <= int(genre_index) <= 3 and genre_index not in select_genres_index: # 入力番号が0~5, まだ入力されていない番号
+                select_genres_index.append(genre_index)
+            elif int(genre_index) == int(8): # 全ジャンルの追加
+                for i in range(0, 4):
+                    if str(i) not in select_genres_index and flag: # select_genres_indexに含まれていない∧flagがTrue
+                        select_genres_index.append(str(i))
+                    elif flag == False:
+                        print(f"Delete Error: 全ジャンル追加済みです")
+                        break
+                flag = False
+            elif genre_index in select_genres_index:
+                print(f"Input Error: {genre_dic[int(genre_index)]}はすでに追加済みです")
             else:
-                print("Warn: 0 ~ 5の整数を入力してください")
+                print(f"Input Error: 入力された[{int(genre_index)+1}]は存在しません")
+
+        for  genre_index in select_genres_index:
+            print(f"Selected Genre: {genre_dic[int(genre_index)][1]}")
+
+    except ValueError: # 数字以外の入力
+        if genre_index == "d": # 空の配列を削除しようとした時の処理
+            if len(select_genres_index) != 0: # 配列に値が存在する場合の処理
+                print(f"Delete: {genre_dic[int(select_genres_index[-1])]}を削除しました")
+                select_genres_index.pop()
+                flag = True
+            else:
+                print("ジャンルが選択されていません")
+            for genre_index in select_genres_index:
+                print(f"Selected Genre: {genre_dic[int(genre_index)][1]}")
+        elif genre_index == "y":
+            for genre_index in select_genres_index:
+                print(f"Selected Genre: {genre_dic[int(genre_index)][1]}")
+        else:
+            print("Warn: 0 ~ 5の整数を入力してください")
 
     print("Process: 都道府県を1~47の整数で選択してください")
     print(tabulate([pref_dic[i:i+7] for i in range(0, len(pref_dic), 7)], tablefmt="plain", stralign="center")) # 7件で折り返す
 
-    # 都道府県選択を行うwhile文
-    while True:
-        #print(tabulate(pref_dic, tablefmt="plain", stralign="center"))
-        print("\033[34mInput\033[0m: 都道府県を半角数値で選択してください [コマンド y:CSVファイルを出力, d:追加した要素を削除]: ")
-        input_pref_index = input("\033[34mEnter\033[0m: ")
-        array_pref_index = input_pref_index.split()
-        try:
-            for pref_index in array_pref_index:
-                if 1 <= int(pref_index) <= 47 and str(input_pref_index) not in select_prefs_index:
-                    select_prefs_index.append(pref_index)
-                else:
-                    print(f"\033[31mWarn\033[0m :入力された番号[{pref_index}]は都道府県リストに存在しないか,既に入力されています.")
-
-            for select_pref_index in select_prefs_index:
-                print(f"\033[32mSelected Pref\033[0m: {pref_dic[int(select_pref_index)-1][1]}")
-
-        except ValueError:
-            if pref_index == "d":
-                if len(select_prefs_index) != 0:
-                    print(f"\033[33mDelete\033[0m: {pref_dic[int(select_prefs_index[-1])][1]}を削除しました")
-                    select_prefs_index.pop()
-                else:
-                    print("\033[33mDelete Error\033[0m: 都道府県が選択されていません")
-            elif pref_index == "y":
-                for select_pref_index in select_prefs_index:
-                    print(f"\033[32mSelected Pref\033[0m: {pref_dic[int(select_pref_index)-1][1]}")
-                break
+    # 都道府県選択を行うwhile文.
+    #print(tabulate(pref_dic, tablefmt="plain", stralign="center"))
+    print("\033[34mInput\033[0m: 都道府県を半角数値で選択してください [コマンド y:CSVファイルを出力, d:追加した要素を削除]: ")
+    input_pref_index = input("\033[34mEnter\033[0m: ")
+    array_pref_index = input_pref_index.split()
+    try:
+        for pref_index in array_pref_index:
+            if 1 <= int(pref_index) <= 47 and str(input_pref_index) not in select_prefs_index:
+                select_prefs_index.append(pref_index)
             else:
-                print("\033[33mInput Error\033[0m: 0 ~ 5 の数字を入力してください。")
+                print(f"\033[31mWarn\033[0m :入力された番号[{pref_index}]は都道府県リストに存在しないか,既に入力されています.")
 
+        for select_pref_index in select_prefs_index:
+            print(f"\033[32mSelected Pref\033[0m: {pref_dic[int(select_pref_index)-1][1]}")
+
+    except ValueError:
+        if pref_index == "d":
+            if len(select_prefs_index) != 0:
+                print(f"\033[33mDelete\033[0m: {pref_dic[int(select_prefs_index[-1])][1]}を削除しました")
+                select_prefs_index.pop()
+            else:
+                print("\033[33mDelete Error\033[0m: 都道府県が選択されていません")
+        elif pref_index == "y":
             for select_pref_index in select_prefs_index:
                 print(f"\033[32mSelected Pref\033[0m: {pref_dic[int(select_pref_index)-1][1]}")
+        else:
+            print("\033[33mInput Error\033[0m: 0 ~ 5 の数字を入力してください。")
+
+        for select_pref_index in select_prefs_index:
+            print(f"\033[32mSelected Pref\033[0m: {pref_dic[int(select_pref_index)-1][1]}")
                 
     if(len(select_prefs_index) != 0):
         for select_genre_index in select_genres_index:
             for select_pref_index in select_prefs_index:
+                url_array = []
+                genres.append( [select_genre_index, str(int(select_pref_index)-1)] )
                 for detail_genre in detail_genres_dic[int(select_genre_index)]:
                     url_array.append(url.format(str(pref_dic[int(select_pref_index)-1][0]).zfill(2), detail_genre, {}))
-                    print( "URL生成中", (url.format(str(pref_dic[int(select_pref_index)-1][0]).zfill(2), detail_genre, {})) )
+                    print( url_array )
+                urls_array.append( url_array )
+        
+        print( urls_array )
 
-        scraping = Scraping(url_array)
+        scraping = Scraping(urls_array, genres)
 
         await scraping.run()
     else:
         print(f"\033[31mWarn\033[0m : 選択されませんでした")
+
+    print("\033[34mInput\033[0m: Enterで終了 ")
+    input("\033[34mEnter\033[0m: ")
 
 asyncio.run(main())
